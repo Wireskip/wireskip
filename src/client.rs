@@ -23,9 +23,7 @@ pub async fn spawn(st: state::Async) -> Result<(), error::Box> {
         let stream = TcpStream::connect(target).await?;
         let (send_req, conn) = h2::client::handshake(stream).await?;
 
-        tokio::spawn(async move {
-            conn.await.unwrap();
-        });
+        tokio::spawn(async move { conn.await });
 
         let mut send_req = send_req.ready().await?;
         let (res, mut send) = send_req.send_request(req, false)?;

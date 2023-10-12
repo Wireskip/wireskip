@@ -65,9 +65,6 @@ async fn server_handle(
 
 pub async fn spawn(st: state::Async) -> Result<(), error::Box> {
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
-    let ts = taskset::new_async();
-
-    reaper::spawn(ts);
 
     let make_service = make_service_fn(|_conn| {
         let st = st.clone();

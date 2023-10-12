@@ -23,6 +23,8 @@ async fn main() -> Result<(), error::Box> {
         version: Version::parse(env!("CARGO_PKG_VERSION")).unwrap(),
     });
 
+    reaper::spawn(st.clone());
+
     match args.mode.as_str() {
         "client" => client::spawn(st).await,
         "server" => server::spawn(st).await,
