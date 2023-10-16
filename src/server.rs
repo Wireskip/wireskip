@@ -1,87 +1,51 @@
-use crate::asyncrw::AsyncRW;
-use crate::payload::{Target, REASON, TARGET, TCP, UDP};
-use crate::senderwrite::SenderWrite;
-use crate::{error, reaper, state, taskset};
-use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response, Server};
-use log::info;
+use crate::{error, tunnel};
+use http_body_util::Empty;
+use hyper::body::Incoming;
+use hyper::server::conn::http2;
+use hyper::service::service_fn;
+use hyper::{Request, Response};
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use log::{debug, error, info};
 use std::net::SocketAddr;
-use tokio::io::copy_bidirectional;
-use tokio::net::TcpStream;
-use tokio_stream::StreamExt;
+use tokio::net::{TcpListener, TcpStream};
+use tokio_util::bytes::Bytes;
 
-async fn server_handle(
-    mut req: Request<Body>,
-    st: state::Async,
-) -> Result<Response<Body>, error::Box> {
-    info!("Handler started");
+type Reply = Result<Response<Empty<Bytes>>, error::Box>;
 
-    let tgt: Target = req
-        .headers()
-        .get(TARGET)
-        .ok_or("missing target header".to_string())?
-        .to_str()?
-        .parse()?;
+async fn server_handle(mut req: Request<Incoming>) -> Reply {
+    let tgt = req.uri().authority();
+    debug!("Handler started for target {tgt:?}");
 
-    let (send_d, out_d) = Body::channel();
+    let mut ts = TcpStream::connect(tgt.ok_or("missing :authority: (target)")?.to_string()).await?;
 
-    st.write().await.tasks.spawn(async move {
-        let addrs = tgt.socket_addrs(|| None)?;
-
-        match tgt.scheme() {
-            TCP => {
-                let mut ts = TcpStream::connect(addrs[0]).await?;
-
-                let mut r_half = tokio_util::io::StreamReader::new(req.body_mut().map(|v| {
-                    v.map_err(|_e| std::io::Error::new(std::io::ErrorKind::Other, "Splice error!"))
-                }));
-                let mut w_half = SenderWrite(send_d);
-
-                let mut arw = AsyncRW {
-                    r: &mut r_half,
-                    w: &mut w_half,
-                };
-
-                let mut trailers = HeaderMap::new();
-                copy_bidirectional(&mut arw, &mut ts).await?;
-
-                trailers.insert(
-                    HeaderName::from_static(REASON),
-                    HeaderValue::from_static("todo reason"),
-                );
-
-                arw.w.0.send_trailers(trailers).await.unwrap();
+    tokio::task::spawn(async move {
+        match hyper::upgrade::on(&mut req).await {
+            Ok(u) => {
+                debug!("Upgraded server side!");
+                tunnel::join(&mut TokioIo::new(u), &mut ts).await.unwrap()
             }
-            UDP => todo!(),
-            &_ => todo!(),
+            Err(e) => error!("Upgrade error: {e}"),
         }
-        Ok(())
     });
-
-    info!("Handler finished");
-    Ok(Response::builder().status(StatusCode::OK).body(out_d)?)
+    Ok(Response::new(http_body_util::Empty::new()))
 }
 
-pub async fn spawn(st: state::Async) -> Result<(), error::Box> {
+pub async fn run() -> Result<(), error::Box> {
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
+    info!("Listening for h2c on {addr}");
+    let l = TcpListener::bind(addr).await?;
 
-    let make_service = make_service_fn(|_conn| {
-        let st = st.clone();
-        async {
-            Ok::<_, error::Box>(service_fn(move |req| {
-                let st = st.clone();
-                server_handle(req, st)
-            }))
-        }
-    });
+    loop {
+        let (stream, addr) = l.accept().await?;
 
-    let server = Server::bind(&addr)
-        .http2_only(true)
-        .http2_enable_connect_protocol()
-        .serve(make_service);
-
-    info!("server is running");
-    server.await?;
-    Ok(())
+        tokio::task::spawn(async move {
+            if let Err(err) = http2::Builder::new(TokioExecutor::new())
+                // .enable_connect_protocol() -- TODO research
+                .serve_connection(TokioIo::new(stream), service_fn(server_handle))
+                .await
+            {
+                info!("Error serving connection from {addr}: {err}");
+            }
+        });
+    }
 }
