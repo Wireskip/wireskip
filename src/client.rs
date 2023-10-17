@@ -1,5 +1,5 @@
 use crate::socks::AddrType;
-use crate::{error, socks, tunnel};
+use crate::{error, socks, tunnel, JoinArgs};
 use http::{Method, Request, StatusCode};
 use http_body_util::Empty;
 use hyper::upgrade;
@@ -11,11 +11,10 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 use tokio_util::bytes::Bytes;
 
-pub async fn run() -> Result<(), error::Box> {
+pub async fn run(args: JoinArgs) -> Result<(), error::Box> {
     // socks from client
-    let socks = SocketAddr::from(([127, 0, 0, 1], 1080));
-    info!("Listening for socks5 on {socks}");
-    let s5l = TcpListener::bind(socks).await.unwrap();
+    info!("Listening for socks5 on {}", args.listen);
+    let s5l = TcpListener::bind(args.listen).await.unwrap();
 
     // tcp to relay
     let relay = SocketAddr::from(([127, 0, 0, 1], 8080));
