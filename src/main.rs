@@ -20,7 +20,7 @@ struct JoinArgs {
     listen: SocketAddr,
 
     /// Arbitrary number of relay hops to onion-route through.
-    hops: Vec<String>,
+    hops: Vec<SocketAddr>,
 }
 
 #[derive(Args, Debug)]

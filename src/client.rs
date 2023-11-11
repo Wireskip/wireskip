@@ -16,31 +16,32 @@ pub async fn run(args: JoinArgs) -> Result<(), error::Box> {
     info!("Listening for socks5 on {}", args.listen);
     let s5l = TcpListener::bind(args.listen).await.unwrap();
 
-    // tcp to relay
-    let relay = SocketAddr::from(([127, 0, 0, 1], 8080));
-    info!("Connecting to relay at {relay}");
-    let relay_io = TokioIo::new(TcpStream::connect(relay).await?);
-    // h2 to relay
-    let (send, h2c) = hyper::client::conn::http2::handshake(TokioExecutor::new(), relay_io).await?;
+    for (n, r) in args.hops.iter().enumerate().map(|(n, r)| (n + 1, r)) {
+        // tcp to relay(s)
+        info!("Connecting to relay {n} at {r}");
+        let relay_io = TokioIo::new(TcpStream::connect(r).await?);
+        // h2 to relay(s)
+        let (send, h2c) =
+            hyper::client::conn::http2::handshake(TokioExecutor::new(), relay_io).await?;
 
-    tokio::task::spawn(async move {
-        if let Err(err) = h2c.await {
-            error!("h2c to relay failed: {err}");
-        }
-    });
+        tokio::task::spawn(async move {
+            if let Err(err) = h2c.await {
+                error!("h2c to relay {n} ({r}) failed: {err}");
+            }
+        });
+    }
 
     let send = Arc::new(Mutex::new(send));
 
     while let Ok((mut l, _)) = s5l.accept().await {
-        let addr = socks::handshake(&mut l).await.unwrap();
+        let addr = match socks::handshake(&mut l).await? {
+            AddrType::IP(sa) => sa.to_string(),
+            AddrType::DN((s, p)) => format!("{s}:{p}"),
+        };
+
         let send = send.clone();
 
         tokio::task::spawn(async move {
-            let addr = match addr {
-                AddrType::IP(sa) => sa.to_string(),
-                AddrType::DN((s, p)) => format!("{s}:{p}"),
-            };
-
             let req = Request::builder()
                 .uri(addr)
                 .method(Method::CONNECT)
