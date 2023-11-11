@@ -15,7 +15,7 @@ struct JoinArgs {
     #[arg(
         short = 'L',
         long,
-        default_value_t = SocketAddr::from(([127, 0, 0, 1], 8080))
+        default_value_t = SocketAddr::from(([127, 0, 0, 1], 1080))
     )]
     listen: SocketAddr,
 
