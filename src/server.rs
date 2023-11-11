@@ -21,7 +21,9 @@ async fn server_handle(mut req: Request<Incoming>) -> Reply {
         match hyper::upgrade::on(&mut req).await {
             Ok(u) => {
                 debug!("Upgraded server side!");
-                tunnel::join(&mut TokioIo::new(u), &mut ts).await.unwrap()
+                if let Err(e) = tunnel::join(&mut TokioIo::new(u), &mut ts).await {
+                    error!("Connection failed with {e}!");
+                }
             }
             Err(e) => error!("Upgrade error: {e}"),
         }

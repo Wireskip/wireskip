@@ -2,66 +2,87 @@ use crate::socks::AddrType;
 use crate::{error, socks, tunnel, JoinArgs};
 use http::{Method, Request, StatusCode};
 use http_body_util::Empty;
-use hyper::upgrade;
+use hyper::client::conn::http2::SendRequest;
+use hyper::upgrade::{self, Upgraded};
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use log::{debug, error, info};
-use std::net::SocketAddr;
-use std::sync::Arc;
+use log::{error, info};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex;
 use tokio_util::bytes::Bytes;
 
+type Sender = SendRequest<Empty<Bytes>>;
+
+async fn handshake<T>(c: T) -> Result<Sender, error::Box>
+where
+    T: hyper::rt::Read + hyper::rt::Write + Send + Unpin + 'static,
+{
+    let (send, h2c) = hyper::client::conn::http2::handshake(TokioExecutor::new(), c).await?;
+    // poll h2 future in the background
+    tokio::task::spawn(async move {
+        if let Err(err) = h2c.await {
+            error!("polling h2c to relay failed: {err}");
+        }
+    });
+    Ok(send)
+}
+
+async fn nexthop(this: &mut Sender, next: String) -> Result<Upgraded, error::Box> {
+    let req = Request::builder()
+        .uri(next)
+        .method(Method::CONNECT)
+        .body(Empty::<Bytes>::new())?;
+
+    let res = this.send_request(req).await?;
+    let status = res.status();
+
+    if status != StatusCode::OK {
+        error!("Server refused upgrade with {status}");
+        Err("server refused upgrade")?
+    }
+
+    Ok(upgrade::on(res).await?)
+}
+
 pub async fn run(args: JoinArgs) -> Result<(), error::Box> {
-    // socks from client
+    // establish circuit
+    // first relay is special
+    let r = args.hops.first().unwrap(); // clap should ensure we have >= 1 hops
+    info!("Connecting to relay 1 at {r}");
+    let c_0 = TcpStream::connect(r).await?; // the only conn which isn't an Upgraded
+    let mut send = handshake(TokioIo::new(c_0)).await?; // always the latest relay's request sender
+
+    if args.hops.len() > 1 {
+        for (n, r) in args.hops[1..].into_iter().enumerate() {
+            let n = n + 2;
+            info!("Connecting to relay {n} at {r}");
+
+            let c_n = nexthop(&mut send, r.to_string()).await?;
+            // TODO:
+            // find out a better way to avoid dropping the value
+            // but allow to use / drop it later
+            std::mem::forget(send);
+            // normally mut reassignment drops the previous value
+            // but because we just forgot it this does not happen here
+            send = handshake(c_n).await?;
+        }
+    }
+
+    // proxy socks from client
     info!("Listening for socks5 on {}", args.listen);
     let s5l = TcpListener::bind(args.listen).await.unwrap();
 
-    for (n, r) in args.hops.iter().enumerate().map(|(n, r)| (n + 1, r)) {
-        // tcp to relay(s)
-        info!("Connecting to relay {n} at {r}");
-        let relay_io = TokioIo::new(TcpStream::connect(r).await?);
-        // h2 to relay(s)
-        let (send, h2c) =
-            hyper::client::conn::http2::handshake(TokioExecutor::new(), relay_io).await?;
-
-        tokio::task::spawn(async move {
-            if let Err(err) = h2c.await {
-                error!("h2c to relay {n} ({r}) failed: {err}");
-            }
-        });
-    }
-
-    let send = Arc::new(Mutex::new(send));
-
+    // TODO: asynchronize
     while let Ok((mut l, _)) = s5l.accept().await {
         let addr = match socks::handshake(&mut l).await? {
             AddrType::IP(sa) => sa.to_string(),
             AddrType::DN((s, p)) => format!("{s}:{p}"),
         };
 
-        let send = send.clone();
+        let mut target = TokioIo::new(nexthop(&mut send, addr).await?);
+        socks::write_ok(&mut l).await?;
 
-        tokio::task::spawn(async move {
-            let req = Request::builder()
-                .uri(addr)
-                .method(Method::CONNECT)
-                .body(Empty::<Bytes>::new())?;
-
-            let res = send.lock().await.send_request(req).await?;
-            let status = res.status();
-
-            if status != StatusCode::OK {
-                error!("Server refused upgrade with {status}");
-                Err("server refused upgrade")?
-            }
-
-            let mut r = TokioIo::new(upgrade::on(res).await?);
-            debug!("Upgraded client side!");
-            socks::write_ok(&mut l).await?;
-            tunnel::join(&mut l, &mut r).await?;
-            Ok::<(), error::Box>(())
-        });
+        tunnel::join(&mut l, &mut target).await?;
     }
-    info!("No more listening for socks5 on :1080");
+
+    info!("No more listening for socks5 on {}", args.listen);
     Ok(())
 }
