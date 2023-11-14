@@ -1,4 +1,4 @@
-use crate::socks::AddrType;
+use crate::socks::Addr;
 use crate::{error, socks, tunnel, JoinArgs};
 use http::{Method, Request, StatusCode};
 use http_body_util::Empty;
@@ -73,8 +73,8 @@ pub async fn run(args: JoinArgs) -> Result<(), error::Box> {
     // TODO: asynchronize
     while let Ok((mut l, _)) = s5l.accept().await {
         let addr = match socks::handshake(&mut l).await? {
-            AddrType::IP(sa) => sa.to_string(),
-            AddrType::DN((s, p)) => format!("{s}:{p}"),
+            Addr::IP(sa) => sa.to_string(),
+            Addr::DN((s, p)) => format!("{s}:{p}"),
         };
 
         let mut target = TokioIo::new(nexthop(&mut send, addr).await?);

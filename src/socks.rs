@@ -3,7 +3,7 @@ use std::{io, net::SocketAddr};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[derive(Debug)]
-pub enum AddrType {
+pub enum Addr {
     IP(SocketAddr),
     DN((String, u16)),
 }
@@ -13,7 +13,7 @@ pub enum Command {
     UdpAssoc,
 }
 
-pub async fn handshake<T>(t: &mut T) -> Result<AddrType, error::Box>
+pub async fn handshake<T>(t: &mut T) -> Result<Addr, error::Box>
 where
     T: AsyncReadExt + AsyncWriteExt + Unpin,
 {
@@ -47,7 +47,7 @@ where
     t.read_exact(&mut addr).await?;
     let port = t.read_u16().await?;
 
-    use AddrType::*;
+    use Addr::*;
     match addr_t {
         0x01 => {
             let v4: [u8; 4] = addr.as_chunks::<4>().0[0];
