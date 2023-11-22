@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use crate::error::Box;
 use crate::socks::Addr;
 use crate::{error, socks, tunnel, JoinArgs};
 use http::{Method, Request, StatusCode};
@@ -5,8 +8,10 @@ use http_body_util::Empty;
 use hyper::client::conn::http2::SendRequest;
 use hyper::upgrade::{self, Upgraded};
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use log::{error, info};
+use log::{debug, error, info};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Mutex;
+use tokio::task;
 use tokio_util::bytes::Bytes;
 
 type Sender = SendRequest<Empty<Bytes>>;
@@ -42,6 +47,23 @@ async fn nexthop(this: &mut Sender, next: String) -> Result<Upgraded, error::Box
     Ok(upgrade::on(res).await?)
 }
 
+async fn s5_join(
+    c0: &mut TcpStream,
+    send: Arc<Mutex<SendRequest<Empty<Bytes>>>>,
+) -> Result<(), Box> {
+    let mut send = send.lock().await;
+
+    let addr = match socks::handshake(c0).await? {
+        Addr::IP(sa) => sa.to_string(),
+        Addr::DN((s, p)) => format!("{s}:{p}"),
+    };
+
+    let mut target = TokioIo::new(nexthop(&mut send, addr).await?);
+    socks::write_ok(c0).await?;
+    tunnel::join(c0, &mut target).await?;
+    Ok(())
+}
+
 pub async fn run(args: JoinArgs) -> Result<(), error::Box> {
     // establish circuit
     // first relay is special
@@ -69,18 +91,17 @@ pub async fn run(args: JoinArgs) -> Result<(), error::Box> {
     // proxy socks from client
     info!("Listening for socks5 on {}", args.listen);
     let s5l = TcpListener::bind(args.listen).await.unwrap();
+    let send_n = Arc::new(Mutex::new(send));
 
-    // TODO: asynchronize
-    while let Ok((mut l, _)) = s5l.accept().await {
-        let addr = match socks::handshake(&mut l).await? {
-            Addr::IP(sa) => sa.to_string(),
-            Addr::DN((s, p)) => format!("{s}:{p}"),
-        };
+    while let Ok((mut c0, peer)) = s5l.accept().await {
+        let send = send_n.clone();
 
-        let mut target = TokioIo::new(nexthop(&mut send, addr).await?);
-        socks::write_ok(&mut l).await?;
-
-        tunnel::join(&mut l, &mut target).await?;
+        task::spawn(async move {
+            match s5_join(&mut c0, send).await {
+                Ok(()) => debug!("SOCKSv5 session from {peer} closed OK"),
+                Err(e) => debug!("SOCKSv5 session from {peer} failed: {e}"),
+            }
+        });
     }
 
     info!("No more listening for socks5 on {}", args.listen);
