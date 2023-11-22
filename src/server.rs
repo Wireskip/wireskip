@@ -1,5 +1,5 @@
 use crate::error::Box;
-use crate::proto::{CONNECT_UDP, UDP_MAX};
+use crate::proto::{decode_capsule, CONNECT_UDP, UDP_MAX};
 use crate::{error, tunnel, HostArgs};
 use http::Method;
 use http_body_util::Empty;
@@ -67,10 +67,23 @@ async fn join_udp(addr: String, u: OnUpgrade) -> io::Result<()> {
 
                 loop {
                     match u.read(&mut buf).await {
-                        Ok(n) => match us.send(&buf[..n]).await {
-                            Ok(n_sent) => assert!(n_sent == n),
-                            Err(e) => error!("UDP send to {addr} failed with: {e}"),
-                        },
+                        Ok(n) => {
+                            if n == 0 {
+                                continue;
+                            }
+
+                            let b = match decode_capsule(&mut &buf[..n]) {
+                                Err(e) => {
+                                    debug!("Error when decoding capsule: {e}");
+                                    continue;
+                                }
+                                Ok(b) => b,
+                            };
+
+                            if let Err(e) = us.send(&b).await {
+                                error!("UDP send to {addr} failed with: {e}");
+                            }
+                        }
                         Err(e) => error!("UDP read from client failed with: {e}"),
                     }
                 }

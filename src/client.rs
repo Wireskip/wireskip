@@ -1,5 +1,5 @@
 use crate::error::Box;
-use crate::proto::{CONNECT_UDP, UDP_MAX};
+use crate::proto::{encode_capsule, CONNECT_UDP, UDP_MAX};
 use crate::{error, socks, tunnel, JoinArgs};
 use http::{Method, Request, StatusCode};
 use http_body_util::Empty;
@@ -156,6 +156,8 @@ pub async fn run(args: JoinArgs) -> Result<(), error::Box> {
         let (addr, packet) = socks::parse_udp(&mut &buf[..sz])?;
         let u = nexthop_udp(send_n.clone(), last.clone(), addr.to_string()).await?;
         let mut u = TokioIo::new(u);
-        u.write_all(&packet).await?
+        let mut capsule = Vec::new();
+        encode_capsule(&mut capsule, &packet);
+        u.write_all(&capsule).await?
     }
 }
