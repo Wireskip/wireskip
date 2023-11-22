@@ -67,10 +67,15 @@ async fn s5_join(
 pub async fn run(args: JoinArgs) -> Result<(), error::Box> {
     // establish circuit
     // first relay is special
-    let r = args.hops.first().unwrap(); // clap should ensure we have >= 1 hops
+    // clap should ensure we have >= 1 hops
+    let r = args.hops.first().unwrap();
     info!("Connecting to relay 1 at {r}");
-    let c_0 = TcpStream::connect(r).await?; // the only conn which isn't an Upgraded
-    let mut send = handshake(TokioIo::new(c_0)).await?; // always the latest relay's request sender
+    // c_0 is the only conn which isn't an Upgraded
+    let c_0 = TcpStream::connect(r).await?;
+    // send is always the latest relay's request sender (innermost onion layer)
+    let mut send = handshake(TokioIo::new(c_0)).await?;
+    // send_prev are the previous hops' request senders (so they are not dropped)
+    let mut send_prev = Vec::new();
 
     if args.hops.len() > 1 {
         for (n, r) in args.hops[1..].into_iter().enumerate() {
@@ -78,12 +83,9 @@ pub async fn run(args: JoinArgs) -> Result<(), error::Box> {
             info!("Connecting to relay {n} at {r}");
 
             let c_n = nexthop(&mut send, r.to_string()).await?;
-            // TODO:
-            // find out a better way to avoid dropping the value
-            // but allow to use / drop it later
-            std::mem::forget(send);
-            // normally mut reassignment drops the previous value
-            // but because we just forgot it this does not happen here
+            // this *moves* current send to send_prev
+            send_prev.push(send);
+            // normally mut reassignment drops the previous value but it was just moved already
             send = handshake(c_n).await?;
         }
     }
