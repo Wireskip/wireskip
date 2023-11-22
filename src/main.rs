@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 
 mod client;
 mod error;
+mod proto;
 mod server;
 mod socks;
 mod tunnel;
