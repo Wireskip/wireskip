@@ -22,7 +22,7 @@ impl Display for Addr {
     }
 }
 
-pub fn parse_udp<'a>(b: &mut impl Buf) -> Result<(Addr, Bytes), Box> {
+pub fn parse_udp(b: &mut impl Buf) -> Result<(Addr, Bytes), Box> {
     let _rsv = b.get_u16();
     let frag = b.get_u8();
 
@@ -79,7 +79,7 @@ where
         Err("unsupported version")?
     };
 
-    let mut authm = vec![0 as u8; t.read_u8().await? as usize];
+    let mut authm = vec![0u8; t.read_u8().await? as usize];
     t.read_exact(&mut authm).await?;
     t.write_all(&[0x05, 0x00]).await?;
 
@@ -100,7 +100,7 @@ where
         0x03 => t.read_u8().await?, // fqdn
         _ => Err("unknown addr type")?,
     };
-    let mut addr = vec![0 as u8; addr_len as usize];
+    let mut addr = vec![0u8; addr_len as usize];
     t.read_exact(&mut addr).await?;
     let port = t.read_u16().await?;
 

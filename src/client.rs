@@ -53,7 +53,7 @@ async fn nexthop_udp(
     next: String,
 ) -> Result<Upgraded, error::Box> {
     let mut this = this.lock().await;
-    let next = next.replace(":", "/");
+    let next = next.replace(':', "/");
     let next_uri = format!("https://{this_host}/.well-known/masque/udp/{next}/");
 
     let req = Request::builder()
@@ -102,7 +102,7 @@ pub async fn run(args: JoinArgs) -> Result<(), error::Box> {
     let mut send_prev = Vec::new();
 
     if args.hops.len() > 1 {
-        for (n, r) in args.hops[1..].into_iter().enumerate() {
+        for (n, r) in args.hops[1..].iter().enumerate() {
             let n = n + 2;
             info!("Connecting to relay {n} at {r}");
 
@@ -135,7 +135,7 @@ pub async fn run(args: JoinArgs) -> Result<(), error::Box> {
     });
 
     // TODO unhardcode?
-    let mut udp_addr = args.listen.clone();
+    let mut udp_addr = args.listen;
     udp_addr.set_port(udp_addr.port() + 1);
 
     let udp = UdpSocket::bind(&udp_addr).await?;
