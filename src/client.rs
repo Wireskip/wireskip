@@ -1,9 +1,9 @@
 use crate::error::Box;
 use crate::proto::{encode_capsule, CONNECT_UDP, UDP_MAX};
 use crate::{error, socks, tunnel, JoinArgs};
-use http::{Method, Request, StatusCode};
 use http_body_util::Empty;
 use hyper::client::conn::http2::SendRequest;
+use hyper::http::{Method, Request, StatusCode};
 use hyper::upgrade::{self, Upgraded};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use log::{debug, error, info};

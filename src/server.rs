@@ -1,10 +1,10 @@
 use crate::error::Box;
 use crate::proto::{decode_capsule, CONNECT_UDP, UDP_MAX};
 use crate::{error, tunnel, HostArgs};
-use http::Method;
 use http_body_util::Empty;
 use hyper::body::Incoming;
 use hyper::ext::Protocol;
+use hyper::http::Method;
 use hyper::server::conn::http2;
 use hyper::service::service_fn;
 use hyper::upgrade::OnUpgrade;

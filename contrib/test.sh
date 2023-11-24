@@ -9,18 +9,18 @@ cleanup() { kill -TERM $pid1 $pid2 $pid3 $pid4 $pid5 $pid6 $pid7 >/dev/null 2>&1
 trap cleanup INT TERM EXIT
 
 # relay 1
-./target/debug/relay host 127.0.0.1:7777 >relay1.log 2>&1 & pid1=$!
+./target/debug/wireskip host 127.0.0.1:7777 >relay1.log 2>&1 & pid1=$!
 
 # relay 2
-./target/debug/relay host 127.0.0.1:8888 >relay2.log 2>&1 & pid2=$!
+./target/debug/wireskip host 127.0.0.1:8888 >relay2.log 2>&1 & pid2=$!
 
 # relay 3
-./target/debug/relay host 127.0.0.1:9999 >relay3.log 2>&1 & pid3=$!
+./target/debug/wireskip host 127.0.0.1:9999 >relay3.log 2>&1 & pid3=$!
 
 sleep 1
 
 # client / socks
-./target/debug/relay join \
+./target/debug/wireskip join \
     127.0.0.1:7777 127.0.0.1:8888 127.0.0.1:9999 \
     >client.log 2>&1 \
     & pid4=$!
